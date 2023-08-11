@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-col page">
+  <div class="flex-col page" v-loading="loading" element-loading-text="Please wait for the createAuction execution to complete">
     <div class="flex-col justify-start items-start self-start text-wrapper">
       <!-- <span class="text">EnglishAuction</span> -->
       <select class="text" v-model="selectedAuction" @change="onChangeSelectedAuction">
@@ -76,78 +76,100 @@ export default {
       description: '',
       bidValues: [],
       bids: [],
-      // ===========这里填写每个用户对应的私钥============
-      // priKeys: [
-      //   "0xc943a1b59ac1da0cdf10e399eba2a1bd3fe37740eb309d5ce75e3856a97548ed",
-      //   "0x6e785527e25ad65a6a68eb2c70cf8bca8189e75931cb860bd3afa7a2d7c417cb",
-      //   "0x40faa2e002750f3278a693cea10ddc73d7fc98e5a543d78b28ad164fc8ab9cce"
-      // ],
+      overrides: {
+        gasLimit: 5000000,
+        gasPrice: ethers.utils.parseUnits('6', 'gwei')
+      },
+      loading: false,
     };
   },
-  mounted() {},
+  mounted() { },
   async created() {
     await this.initWeb3();
     await this.refreshList();
   },
   methods: {
     async onCreate() {
-      // console.log(this.nftId);
-      // console.log(this.startPrice);
-      // console.log(this.endPrice);
-      // console.log(this.duration);
-      // console.log(this.title);
-      // console.log(this.description);
+      try {
+        // 载入合约
+        const erc165 = new ethers.Contract(erc165Address, erc165ABI, this.provider.getSigner());
+        const englishFactory = new ethers.Contract(EnglishFactoryAddress, EnglishFactoryABI, this.provider.getSigner());
+        const dutchFactory = new ethers.Contract(DutchFactoryAddress, DutchFactoryABI, this.provider.getSigner());
 
-      const overrides = {
-        gasLimit: 5000000,
-        gasPrice: ethers.utils.parseUnits('6', 'gwei')
-      };
+        if (this.selectedAuction === 'EnglishAuction') {
+          // 1.调用NFT合约的mine方法创建藏品
+          await erc165.mint(this.selectedAccount, this.nftId, this.overrides);
 
-      // const chooseIndex = this.accounts.indexOf(this.selectedAccount);
-      // const wallet = new ethers.Wallet(this.priKeys[chooseIndex], this.provider);
+          // 2.调用工厂合约创建拍卖，并通过getAuction获取该拍卖的地址
+          await englishFactory.createAuction(erc165Address, this.nftId, this.startPrice, this.title, this.description, this.overrides);
+          console.log('createAuction');
 
-      // 载入合约
-      const erc165 = new ethers.Contract(erc165Address, erc165ABI, this.provider.getSigner());
-      const englishFactory = new ethers.Contract(EnglishFactoryAddress, EnglishFactoryABI, this.provider.getSigner());
-      const dutchFactory = new ethers.Contract(DutchFactoryAddress, DutchFactoryABI, this.provider.getSigner());
+          this.loading = true;
+          englishFactory.on("AuctionCreated", async (nftId, newAuctionAddress, auctionsLength) => {
+            this.loading = false;
 
-      if (this.selectedAuction === 'EnglishAuction') {
-        // 1.调用NFT合约的mine方法创建藏品
-        await erc165.mint(this.selectedAccount, this.nftId);
+            console.log(nftId, newAuctionAddress, auctionsLength);
 
-        // 2.调用工厂合约创建拍卖，并通过getAuction获取该拍卖的地址
-        await englishFactory.createAuction(erc165Address, this.nftId, this.startPrice, this.title, this.description, overrides);
-        console.log('createAuction');
+            const auctions = await englishFactory.getAuctions();
+            console.log(auctions);
 
-        const auctions = await englishFactory.getAuctions();
-        console.log('auctions: ' + auctions);
+            const auctionAddress = auctions[auctions.length - 1];
+            console.log(auctionAddress);
 
-        const auctionAddress = auctions[auctions.length - 1];
-        console.log('auctionAddress: ' + auctionAddress);
+            // 3.调用NFT合约的approve方法授予权限
+            await erc165.approve(auctionAddress, this.nftId, this.overrides);
 
-        // 3.调用NFT合约的approve方法授予权限
-        await erc165.approve(auctionAddress, this.nftId);
+            // 4.调用Auction合约开始拍卖
+            const englishAuction = new ethers.Contract(auctionAddress, EnglishAuctionABI, this.provider.getSigner());
+            await englishAuction.start(this.overrides);
 
-        // 4.调用Auction合约开始拍卖
-        const englishAuction = new ethers.Contract(auctionAddress, EnglishAuctionABI, this.provider.getSigner());
-        await englishAuction.start();
-      } else {
-        // 1.调用NFT合约的mine方法创建藏品
-        await erc165.mint(this.selectedAccount, this.nftId);
-        // 2.调用工厂合约创建拍卖，并通过getAuction获取该拍卖的地址
-        await dutchFactory.createAuction(erc165Address, this.nftId, this.startPrice, this.endPrice, this.duration, this.title, this.description);
-        const auctions = await dutchFactory.getAuctions();
-        console.log('auctions: ' + auctions);
-        const auctionAddress = auctions[auctions.length - 1];
-        console.log('auctionAddress: ' + auctionAddress);
-        // 3.调用NFT合约的approve方法授予权限
-        await erc165.approve(auctionAddress, this.nftId);
-        // 4.调用Auction合约开始拍卖
-        const dutchAuction = new ethers.Contract(auctionAddress, DutchAuctionABI, this.provider.getSigner());
-        await dutchAuction.start();
+            this.$notify({
+              message: 'success',
+              type: 'success'
+            });
+
+            this.refreshList();
+          });
+        } else {
+          // 1.调用NFT合约的mine方法创建藏品
+          await erc165.mint(this.selectedAccount, this.nftId, this.overrides);
+
+          // 2.调用工厂合约创建拍卖，并通过getAuction获取该拍卖的地址
+          await dutchFactory.createAuction(erc165Address, this.nftId, this.startPrice, this.endPrice, this.duration, this.title, this.description, this.overrides);
+
+          this.loading = true;
+          dutchFactory.on("AuctionCreated", async (nftId, newAuctionAddress, auctionsLength) => {
+            this.loading = false;
+
+            console.log(nftId, newAuctionAddress, auctionsLength);
+
+            const auctions = await dutchFactory.getAuctions();
+            console.log('auctions: ' + auctions);
+
+            const auctionAddress = auctions[auctions.length - 1];
+            console.log('auctionAddress: ' + auctionAddress);
+
+            // 3.调用NFT合约的approve方法授予权限
+            await erc165.approve(auctionAddress, this.nftId, this.overrides);
+
+            // 4.调用Auction合约开始拍卖
+            const dutchAuction = new ethers.Contract(auctionAddress, DutchAuctionABI, this.provider.getSigner());
+            await dutchAuction.start(this.overrides);
+
+            this.$notify({
+              message: 'success',
+              type: 'success'
+            });
+
+            this.refreshList();
+          });
+        }
+      } catch (error) {
+        this.$notify({
+          message: error,
+          type: 'error'
+        });
       }
-      alert("Success");
-      this.refreshList();
     },
     async initWeb3() {
       if (typeof window.ethereum == 'undefined') {
@@ -179,9 +201,6 @@ export default {
       }
     },
     async refreshList() {
-      // const chooseIndex = this.accounts.indexOf(this.selectedAccount);
-      // const wallet = new ethers.Wallet(this.priKeys[chooseIndex], this.provider);
-
       const englishFactory = new ethers.Contract(EnglishFactoryAddress, EnglishFactoryABI, this.provider.getSigner());
       const dutchFactory = new ethers.Contract(DutchFactoryAddress, DutchFactoryABI, this.provider.getSigner());
       const bids = [];
@@ -225,15 +244,20 @@ export default {
     },
     async onBid(index, val) {
       console.log(val);
-      // const chooseIndex = this.accounts.indexOf(this.selectedAccount);
-      // const wallet = new ethers.Wallet(this.priKeys[chooseIndex], this.provider);
-
       if (this.selectedAuction === 'EnglishAuction') {
         const englishAuction = new ethers.Contract(this.bids[index].address, EnglishAuctionABI, this.provider.getSigner());
-        await englishAuction.bid({ value: val });
+        await englishAuction.bid({
+          value: val,
+          gasLimit: 5000000,
+          gasPrice: ethers.utils.parseUnits('6', 'gwei')
+        });
       } else {
         const dutchAuction = new ethers.Contract(this.bids[index].address, DutchAuctionABI, this.provider.getSigner());
-        await dutchAuction.bid({ value: val });
+        await dutchAuction.bid({
+          value: val,
+          gasLimit: 5000000,
+          gasPrice: ethers.utils.parseUnits('6', 'gwei')
+        });
       }
       this.refreshList();
     },

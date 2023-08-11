@@ -50,7 +50,7 @@ contract EnglishAuction {
 
         nft.transferFrom(msg.sender, address(this), nftId);
         started = true;
-        endAt = block.timestamp + 60;
+        endAt = block.timestamp + 300;
 
         emit Start();
     }
@@ -105,6 +105,7 @@ contract EnglishAuction {
 
 contract EnglishAuctionFactory {
     address[] public auctions;
+    event AuctionCreated(uint indexed, address indexed, uint indexed);
     
     function createAuction(
         address _nft,
@@ -115,6 +116,7 @@ contract EnglishAuctionFactory {
     ) external returns (address) {
         EnglishAuction newAuction = new EnglishAuction(_nft, _nftId, _startingBid, _title, _description, msg.sender);
         auctions.push(address(newAuction));
+        emit AuctionCreated(_nftId, address(newAuction), auctions.length);
         return address(newAuction);
     }
 

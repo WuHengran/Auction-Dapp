@@ -119,6 +119,7 @@ contract DutchAuction {
 
 contract DutchAuctionFactory {
     address[] public auctions;
+    event AuctionCreated(uint indexed, address indexed, uint indexed);
 
     function createAuction(
         address _nft,
@@ -140,6 +141,7 @@ contract DutchAuctionFactory {
             msg.sender
         );
         auctions.push(address(newAuction));
+        emit AuctionCreated(_nftId, address(newAuction), auctions.length);
         return address(newAuction);
     }
 
